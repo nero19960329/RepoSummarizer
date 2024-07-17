@@ -44,13 +44,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut paths_summary = String::from("## Key Files Paths\n");
     let mut contents_summary = String::from("\n## Files Contents\n");
 
-    for pattern in config.files {
-        let full_pattern = PathBuf::from(base_path).join(pattern);
+    let (include_patterns, exclude_patterns): (Vec<_>, Vec<_>) = config
+        .files
+        .into_iter()
+        .partition(|pattern| !pattern.starts_with('!'));
+
+    for pattern in include_patterns {
+        let full_pattern = PathBuf::from(base_path).join(&pattern);
         match glob(&full_pattern.to_string_lossy()) {
             Ok(paths) => {
                 for entry in paths {
                     if let Ok(path) = entry {
-                        if path.is_file() {
+                        if path.is_file() && !should_skip(&path, &exclude_patterns) {
                             paths_summary.push_str(&format!("- {}\n", path.display()));
                             let content = fs::read_to_string(&path)?;
                             contents_summary.push_str(&format!(
@@ -73,4 +78,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("{}\n{}", paths_summary, contents_summary);
 
     Ok(())
+}
+
+fn should_skip(path: &PathBuf, exclude_patterns: &[String]) -> bool {
+    exclude_patterns.iter().any(|pattern| {
+        let pattern = pattern.trim_start_matches('!');
+        let full_pattern = PathBuf::from(pattern);
+        match glob(&full_pattern.to_string_lossy()) {
+            Ok(mut paths) => paths.any(|entry| {
+                if let Ok(exclude_path) = entry {
+                    path.starts_with(exclude_path)
+                } else {
+                    false
+                }
+            }),
+            Err(_) => false,
+        }
+    })
 }
